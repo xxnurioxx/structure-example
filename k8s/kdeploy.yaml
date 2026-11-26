@@ -1,0 +1,60 @@
+# Least privilege: deployments only, nothing else. No secrets, no pods/exec.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kdeploy
+  namespace: kdeploy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kdeploy
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kdeploy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kdeploy
+subjects:
+  - kind: ServiceAccount
+    name: kdeploy
+    namespace: kdeploy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kdeploy
+  namespace: kdeploy
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app.kubernetes.io/name: kdeploy }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: kdeploy }
+    spec:
+      serviceAccountName: kdeploy
+      containers:
+        - name: kdeploy
+          image: ghcr.io/acme/kdeploy:latest
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - name: KDEPLOY_TOKENS # actor=token,actor=token
+              valueFrom: { secretKeyRef: { name: kdeploy, key: tokens } }
+          readinessProbe: { httpGet: { path: /readyz, port: http } }
+          livenessProbe: { httpGet: { path: /healthz, port: http } }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
